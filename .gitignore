@@ -1,0 +1,9 @@
+# build/runtime artifacts
+DSHLauncher.exe
+DSHLauncher-selftest.log
+*.log
+config.json
+
+# editor
+.vs/
+*.user
