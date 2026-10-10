@@ -13,15 +13,16 @@ namespace DSHLauncher
     public class MainForm : Form
     {
         private const string DefaultRepo = "";
-        private const string Version = "2.0.0";
+        private const string Version = "2.1.0";
 
         private TextBox _txtRepo;
-        private Button _btnStart, _btnStop, _btnUpdate, _btnBuild, _btnOpen, _btnShortcut;
+        private Button _btnStart, _btnStop, _btnUpdate, _btnBuild, _btnClean, _btnOpen, _btnShortcut;
         private Label _status;
         private RichTextBox _log;
         private string _repoRoot = DefaultRepo;
         private int _port = 3080;
         private HarnessService _service = new HarnessService();
+        private bool _busy;
 
         public MainForm()
         {
@@ -82,6 +83,7 @@ namespace DSHLauncher
                 if (repo != null) GitUpdater.Run(this, repo);
             });
             _btnBuild = MakeButton("构建 (pnpm run build)", 170, delegate { StartBuild(); });
+            _btnClean = MakeButton("修复 (pnpm run clean)", 160, delegate { StartClean(); });
             _btnOpen = MakeButton("打开页面", 100, delegate
             {
                 if (HarnessService.PortOpen(_port)) OpenPage();
@@ -94,6 +96,7 @@ namespace DSHLauncher
             flow.Controls.Add(_btnStop);
             flow.Controls.Add(_btnUpdate);
             flow.Controls.Add(_btnBuild);
+            flow.Controls.Add(_btnClean);
             flow.Controls.Add(_btnOpen);
             flow.Controls.Add(_btnShortcut);
 
@@ -244,15 +247,20 @@ namespace DSHLauncher
         {
             string repo = RepoRootFromUi();
             if (repo == null) return;
+            if (_busy) { AppLog.Write("已有构建/清理任务在运行"); return; }
+            _busy = true;
             _btnBuild.Enabled = false;
+            _btnClean.Enabled = false;
             Status("构建中... (pnpm run build)", "DarkOrange");
             AppLog.Write("开始构建: pnpm run build (仓库: " + repo + ")");
             Task.Run(delegate
             {
-                bool ok = RunBuildProcess(repo);
+                bool ok = RunPnpm(repo, "build");
                 Ui(delegate
                 {
+                    _busy = false;
                     _btnBuild.Enabled = true;
+                    _btnClean.Enabled = true;
                     if (ok)
                     {
                         Status("构建完成", "Green");
@@ -262,19 +270,60 @@ namespace DSHLauncher
                     }
                     else
                     {
-                        Status("构建失败，见日志", "Red");
-                        AppLog.Write("pnpm run build 失败");
-                        MessageBox.Show(this, "pnpm run build 失败，请查看日志。", "构建失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        Status("构建失败，可尝试\"修复\"", "Red");
+                        AppLog.Write("pnpm run build 失败（可点击\"修复 (pnpm run clean)\"清理构建残留后重试）");
+                        DialogResult fix = MessageBox.Show(this,
+                            "pnpm run build 失败。\n\n是否运行 pnpm run clean 清理构建残留后重试？",
+                            "构建失败", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                        if (fix == DialogResult.Yes) StartClean();
                     }
                 });
             });
         }
 
-        private bool RunBuildProcess(string repo)
+        private void StartClean()
+        {
+            string repo = RepoRootFromUi();
+            if (repo == null) return;
+            if (_busy) { AppLog.Write("已有构建/清理任务在运行"); return; }
+            _busy = true;
+            _btnBuild.Enabled = false;
+            _btnClean.Enabled = false;
+            Status("清理中... (pnpm run clean)", "DarkOrange");
+            AppLog.Write("开始清理: pnpm run clean (仓库: " + repo + ")");
+            Task.Run(delegate
+            {
+                bool ok = RunPnpm(repo, "clean");
+                Ui(delegate
+                {
+                    _busy = false;
+                    _btnBuild.Enabled = true;
+                    _btnClean.Enabled = true;
+                    if (ok)
+                    {
+                        Status("清理完成", "Green");
+                        AppLog.Write("pnpm run clean 完成");
+                        DialogResult again = MessageBox.Show(this,
+                            "pnpm run clean 完成，构建残留已清理。\n\n是否立即重新构建 (pnpm run build)？",
+                            "修复完成", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                        if (again == DialogResult.Yes) StartBuild();
+                        else CheckMode();
+                    }
+                    else
+                    {
+                        Status("清理失败，见日志", "Red");
+                        AppLog.Write("pnpm run clean 失败");
+                        MessageBox.Show(this, "pnpm run clean 失败，请查看日志。", "清理失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                });
+            });
+        }
+
+        private bool RunPnpm(string repo, string script)
         {
             try
             {
-                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c pnpm run build");
+                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c pnpm run " + script);
                 psi.WorkingDirectory = repo;
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true;
@@ -292,7 +341,7 @@ namespace DSHLauncher
             }
             catch (Exception ex)
             {
-                AppLog.Write("构建启动失败: " + ex.Message);
+                AppLog.Write("pnpm run " + script + " 启动失败: " + ex.Message);
                 return false;
             }
         }
