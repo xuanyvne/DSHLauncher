@@ -73,3 +73,5 @@ type DSHLauncher-selftest.log
 - 停止服务会按端口定位进程，弹窗确认后才终止外部进程，避免误杀
 - 仓库更新（zip 副本场景）会执行 git reset --hard，二次确认后才执行
 - 构建失败时的推荐流程：点"修复 (pnpm run clean)"清理残留 → 弹窗里选"是"直接重新构建
+- 构建/清理超过 30 秒无输出时会打印心跳提示，避免看起来像卡死
+- 若日志出现 "Corepack is about to download"，说明 corepack 正在从 registry.npmjs.org 下载 pnpm（国内网络可能很慢）。解决办法：设置环境变量 `COREPACK_NPM_REGISTRY=https://registry.npmmirror.com` 后重启启动器，或先执行 `corepack install -g pnpm@<版本>` 预下载

@@ -13,7 +13,7 @@ namespace DSHLauncher
     public class MainForm : Form
     {
         private const string DefaultRepo = "";
-        private const string Version = "2.1.0";
+        private const string Version = "2.1.1";
 
         private TextBox _txtRepo;
         private Button _btnStart, _btnStop, _btnUpdate, _btnBuild, _btnClean, _btnOpen, _btnShortcut;
@@ -331,11 +331,37 @@ namespace DSHLauncher
                 psi.RedirectStandardError = true;
                 using (Process p = Process.Start(psi))
                 {
-                    p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) AppLog.Write(e.Data); };
-                    p.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e) { if (e.Data != null) AppLog.Write(e.Data); };
+                    DateTime lastOutput = DateTime.Now;
+                    DateTime lastHeartbeat = DateTime.Now;
+                    bool ended = false;
+                    System.Threading.Timer heartbeat = new System.Threading.Timer(delegate(object state)
+                    {
+                        if (ended) return;
+                        int silent = (int)(DateTime.Now - lastOutput).TotalSeconds;
+                        if (silent >= 30 && (DateTime.Now - lastHeartbeat).TotalSeconds >= 30)
+                        {
+                            lastHeartbeat = DateTime.Now;
+                            AppLog.Write("……仍在运行中（已 " + silent + " 秒无输出；完整构建通常需要数分钟）");
+                        }
+                    }, null, 30000, 15000);
+                    DataReceivedEventHandler handler = delegate(object s2, DataReceivedEventArgs e)
+                    {
+                        if (e.Data == null) return;
+                        lastOutput = DateTime.Now;
+                        AppLog.Write(e.Data);
+                        if (e.Data.IndexOf("Corepack is about to download", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            AppLog.Write("提示: corepack 正在下载 pnpm，默认源 registry.npmjs.org 在国内可能很慢或超时。");
+                            AppLog.Write("      解决: 设置环境变量 COREPACK_NPM_REGISTRY=https://registry.npmmirror.com 后重启启动器；或先执行 corepack install -g pnpm@<package.json 里的版本>。");
+                        }
+                    };
+                    p.OutputDataReceived += handler;
+                    p.ErrorDataReceived += handler;
                     p.BeginOutputReadLine();
                     p.BeginErrorReadLine();
                     p.WaitForExit();
+                    ended = true;
+                    heartbeat.Dispose();
                     return p.ExitCode == 0;
                 }
             }
